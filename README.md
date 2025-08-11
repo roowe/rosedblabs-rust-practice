@@ -1,5 +1,7 @@
 ## Rust-Practice
 
+原链接是 [https://github.com/rosedblabs/rust-practice](https://github.com/rosedblabs/rust-practice)
+
 some tiny learning projects in Rust, awesome!
 
 * mini-bitcask-rs
@@ -8,14 +10,26 @@ some tiny learning projects in Rust, awesome!
 
 ***
 
-## 重磅更新，Rust 手写数据库！
 
-我使用 Rust 写了一个数据库系统教程，从零实现一个完整的 SQL 数据库系统，将会由浅到深、由易到难，循序渐进的带着大家去实现，从第一行代码开始，均有完整的代码实现演示。
 
- 通过此项目，你可以：
+## expr-eval2
 
-* 入门并巩固 Rust 基础，课程内容几乎涵盖了 Rust 大多数常用基础，例如数据类型，match 表达式匹配，函数，闭包，结构体，泛型，Trait，所有权，借用，生命周期，错误处理，智能指针等等
-* 增加 Rust 项目经验的同学，如果学习了一些 Rust 的基础知识，但是苦于没有项目经验，想要进一步巩固自己的知识，自己写一个数据库是一个很合适的实战项目。
+[expr-eval2](./expr-eval2)提供了三种实现方式。
 
-教程地址：https://w02agegxg3.feishu.cn/docx/OxwGdeM30oss7vxEG5AcUn4unEc
 
+
+一开始，对着作者的源码，手敲。作者的写法是“递归下降解析器”，这个以前没有见过。
+
+
+
+搞明白之后，自己做了个“双栈”，`direct_evaluation`，这个之前在学算法或者数据结构的时候写过。核心思路，
+
+- 左到右遍历，数字进数据栈
+- 遇到`(`，压栈；遇到`)`，就pop符号做计算，直到遇到`(`。
+- 遇到符号就判断优先级，栈的优先级高，就pop符号，先计算。这里有个要注意的是`^`的“右结合”的问题，右边先算。栈顶符号优先级要严格大于遍历的运算符。否则，等于也可以，左边先算。
+  - 举例9+2\*5，遇到\*，\*压栈，不会马上计算，符号压栈。
+  - 举例9+1+2\*5，遇到第二个+，+不压栈，会马上计算9+1=10，然后数据压栈。
+
+
+
+AI给我写了个`shunting_yard_evaluate`，中序转后序，然后再计算。
