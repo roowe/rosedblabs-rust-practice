@@ -1,8 +1,6 @@
 use std::fs::{self, File};
 use std::path::Path;
-use std::sync::RwLock;
 use std::mem;
-use std::env;
 use std::collections::HashMap;
 use std::path::PathBuf;
 // 跨平台代码可以这样写
@@ -15,10 +13,9 @@ use std::os::windows::fs::FileExt;
 use anyhow::Result;
 
 struct MiniBitCask {
-    indexs: HashMap<String, u64>,
+    indexes: HashMap<String, u64>,
     db_file: DBFile,
     dir_path: PathBuf,
-    mu: RwLock<()>,
 }
 
 impl MiniBitCask {
@@ -36,9 +33,8 @@ impl MiniBitCask {
         let db_file = DBFile::new(&dir_path)?;
         let mut db = Self {
             db_file,
-            indexs: HashMap::new(),
+            indexes: HashMap::new(),
             dir_path: dir_path,
-            mu: RwLock::new(()),
         };
         db.load_indexes_from_file()?;
         Ok(db)
@@ -51,10 +47,10 @@ impl MiniBitCask {
                     let entry_size = entry.get_size();
                     match entry.mark {
                         Mark::PUT => {
-                            self.indexs.insert(entry.key, offset);
+                            self.indexes.insert(entry.key, offset);
                         }
                         Mark::DELETE => {
-                            self.indexs.remove(&entry.key);
+                            self.indexes.remove(&entry.key);
                         }
                     }
                     offset += entry_size as u64;
@@ -74,28 +70,26 @@ impl MiniBitCask {
     }
     fn put(&mut self, key: &str, value: &[u8]) -> Result<()> {
         {
-            let _mu = self.mu.write().map_err(|e| anyhow::anyhow!("Lock error: {:?}", e))?;
             let entry = Entry::new(key.to_string(), value.to_vec(), Mark::PUT);
             let offset = self.db_file.offset;
             self.db_file.write(&entry)?;
-            self.indexs.insert(key.to_string(), offset);
+            self.indexes.insert(key.to_string(), offset);
         }
         Ok(())
     }
-    fn get(&self, key: &str) -> Result<Vec<u8>> {
-        let _mu = self.mu.read().map_err(|e| anyhow::anyhow!("Lock error: {:?}", e))?;
-        let offset = self
-            .indexs
-            .get(key)
-            .ok_or(anyhow::anyhow!("key not found"))?;
-        let entry = self.db_file.read(*offset)?;
-        Ok(entry.value)
+    fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        let offset = self.indexes.get(key);
+        if let Some(offset) = offset {
+            let entry = self.db_file.read(*offset)?;
+            Ok(Some(entry.value))
+        } else {
+            Ok(None)
+        }
     }
     fn delete(&mut self, key: &str) -> Result<()> {
-        let _mu = self.mu.write().map_err(|e| anyhow::anyhow!("Lock error: {:?}", e))?;
         let entry = Entry::new(key.to_string(), Vec::new(), Mark::DELETE);
         self.db_file.write(&entry)?;
-        self.indexs.remove(key);
+        self.indexes.remove(key);
         Ok(())
     }
     fn merge(&mut self) -> Result<()> {
@@ -104,12 +98,12 @@ impl MiniBitCask {
         }
         let mut offset = 0;
         let mut valid_entries: Vec<Entry> = Vec::new();
-        println!("indexs: {:?}", self.indexs);
+        println!("indexes: {:?}", self.indexes);
         loop {
             match self.db_file.read(offset) {
                 Ok(entry) => {
                     let entry_size = entry.get_size();
-                    if let Some(entry_offset) = self.indexs.get(&entry.key) && offset == *entry_offset {
+                    if let Some(entry_offset) = self.indexes.get(&entry.key) && offset == *entry_offset {
                         valid_entries.push(entry);
                     } 
                     offset += entry_size as u64;
@@ -128,18 +122,17 @@ impl MiniBitCask {
         println!("valid_entries: {:?}", valid_entries);
         let mut merge_db_file = DBFile::new_merge(&self.dir_path)?;
         {
-            let _mu = self.mu.write().map_err(|e| anyhow::anyhow!("Lock error: {:?}", e))?;
             for entry in valid_entries {
-                let write_offsize = merge_db_file.offset;
+                let write_offset= merge_db_file.offset;
                 merge_db_file.write(&entry)?;
-                self.indexs.insert(entry.key, write_offsize);
+                self.indexes.insert(entry.key, write_offset);
             }
             let old_path = self.db_file.filename.clone();
             let merge_path = merge_db_file.filename.clone();
 
-            let temp_placeholder = env::temp_dir().join("placeholder.tmp");
-            fs::create_dir_all(&temp_placeholder)?;
-            drop(mem::replace(&mut self.db_file, DBFile::new(&temp_placeholder)?));
+            let tmp_dir = tempfile::TempDir::new_in(&self.dir_path)?;
+
+            drop(mem::replace(&mut self.db_file, DBFile::new(&tmp_dir)?));
             drop(merge_db_file);
 
             let _ = fs::remove_file(&old_path);
@@ -151,8 +144,8 @@ impl MiniBitCask {
     }
 
 }
-const FILE_NAME: &'static str = "minibitcask.data";
-const MERGE_FILE_NAME: &'static str = "minibitcask.data.merge";
+const FILE_NAME: &str = "minibitcask.data";
+const MERGE_FILE_NAME: &str = "minibitcask.data.merge";
 
 struct DBFile {
     file: File,
@@ -188,34 +181,22 @@ impl DBFile {
     }
     fn read_u32(&self, offset: u64) -> Result<u32> {
         let mut buffer: [u8; 4] = [0; 4];
-        let bytes_read = self.file.read_at(&mut buffer, offset)?;
-        if bytes_read == 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "read_u32: expected 4 bytes, got 0").into());
-        }
+        read_exact_at(&self.file, &mut buffer, offset)?;
         Ok(u32::from_be_bytes(buffer))
     }
     fn read_u16(&self, offset: u64) -> Result<u16> {
         let mut buffer: [u8; 2] = [0; 2];
-        let bytes_read = self.file.read_at(&mut buffer, offset)?;
-        if bytes_read == 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "read_u16: expected 2 bytes, got 0").into());
-        }
+        read_exact_at(&self.file, &mut buffer, offset)?;
         Ok(u16::from_be_bytes(buffer))
     }
     fn read_string(&self, offset: u64, size: u32) -> Result<String> {
         let mut buffer: Vec<u8> = vec![0; size as usize];
-        let bytes_read = self.file.read_at(&mut buffer, offset)?;
-        if bytes_read == 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "read_string: expected some bytes, got 0").into());
-        }
+        read_exact_at(&self.file, &mut buffer, offset)?;
         Ok(String::from_utf8(buffer)?)
     }
     fn read_bytes(&self, offset: u64, size: u32) -> Result<Vec<u8>> {
         let mut buffer: Vec<u8> = vec![0; size as usize];
-        let bytes_read = self.file.read_at(&mut buffer, offset)?;
-        if bytes_read == 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "read_bytes: expected some bytes, got 0").into());
-        }
+        read_exact_at(&self.file, &mut buffer, offset)?;
         Ok(buffer)
     }
     fn read(&self, offset: u64) -> Result<Entry> {
@@ -241,10 +222,33 @@ impl DBFile {
     }
     fn write(&mut self, entry: &Entry) -> Result<()> {
         let data = entry.encode();
-        self.file.write_at(&data, self.offset)?;
+        write_all_at(&self.file, &data, self.offset)?;
         self.offset += data.len() as u64;
         Ok(())
     }    
+}
+fn read_exact_at(file: &File, mut buf: &mut [u8], mut offset: u64) -> std::io::Result<()> {
+    while !buf.is_empty() {
+        let n = file.read_at(buf, offset)?;
+        if n == 0 {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "short read"));
+        }
+        offset += n as u64;
+        buf = &mut buf[n..];
+    }
+    Ok(())
+}
+
+fn write_all_at(file: &File, mut buf: &[u8], mut offset: u64) -> std::io::Result<()> {
+    while !buf.is_empty() {
+        let n = file.write_at(buf, offset)?;
+        if n == 0 {
+            return Err(std::io::Error::new(std::io::ErrorKind::WriteZero, "short write"));
+        }
+        offset += n as u64;
+        buf = &buf[n..];
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -268,11 +272,11 @@ impl From<[u8; 2]> for Mark {
     }
 }
 
-impl Mark {
-    fn from_be_bytes(bytes: [u8; 2]) -> Self {
-        Self::from(bytes)
-    }
-}
+// impl Mark {
+//     fn from_be_bytes(bytes: [u8; 2]) -> Self {
+//         Self::from(bytes)
+//     }
+// }
 
 #[derive(Debug, Clone)]
 struct Entry {
@@ -320,19 +324,34 @@ fn main() -> Result<()> {
     db.put("key5", String::from("value5").as_bytes())?;
 
     let value = db.get("key1")?;
-    println!("value: {:?}", String::from_utf8(value)?);
+    match value {
+        Some(value) => {
+            println!("value: {:?}", String::from_utf8(value)?);
+        }
+        None => {
+            println!("key1 not found");
+        }
+    }
 
     db.put("key1", String::from("value11").as_bytes())?;
     let value = db.get("key1")?;
-    println!("value: {:?}", String::from_utf8(value)?);
-
-    db.delete("key1")?;
-    match db.get("key1") {
-        Ok(value) => {
+    match value {
+        Some(value) => {
             println!("value: {:?}", String::from_utf8(value)?);
         }
-        Err(e) => {
-            println!("error: {:?}", e);
+        None => {
+            println!("key1 not found");
+        }
+    }
+
+    db.delete("key1")?;
+    let value = db.get("key1")?;
+    match value {
+        Some(value) => {
+            println!("value: {:?}", String::from_utf8(value)?);
+        }
+        None => {
+            println!("key1 not found");
         }
     }
     db.merge()?;
