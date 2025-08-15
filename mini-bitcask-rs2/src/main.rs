@@ -46,9 +46,6 @@ impl MiniBitCask {
     fn load_indexes_from_file(&mut self) -> Result<()> {
         let mut offset = 0;
         loop {
-            // if offset > 100 {
-            //     break;
-            // }
             match self.db_file.read(offset) {
                 Ok(entry) => {
                     let entry_size = entry.get_size();
@@ -76,15 +73,17 @@ impl MiniBitCask {
         Ok(())
     }
     fn put(&mut self, key: &str, value: &[u8]) -> Result<()> {
-        let _mu = self.mu.write().unwrap();
-        let entry = Entry::new(key.to_string(), value.to_vec(), Mark::PUT);
-        let offset = self.db_file.offset;
-        self.db_file.write(&entry)?;
-        self.indexs.insert(key.to_string(), offset);
+        {
+            let _mu = self.mu.write().map_err(|e| anyhow::anyhow!("Lock error: {:?}", e))?;
+            let entry = Entry::new(key.to_string(), value.to_vec(), Mark::PUT);
+            let offset = self.db_file.offset;
+            self.db_file.write(&entry)?;
+            self.indexs.insert(key.to_string(), offset);
+        }
         Ok(())
     }
     fn get(&self, key: &str) -> Result<Vec<u8>> {
-        let _mu = self.mu.read().unwrap();
+        let _mu = self.mu.read().map_err(|e| anyhow::anyhow!("Lock error: {:?}", e))?;
         let offset = self
             .indexs
             .get(key)
@@ -93,7 +92,7 @@ impl MiniBitCask {
         Ok(entry.value)
     }
     fn delete(&mut self, key: &str) -> Result<()> {
-        let _mu = self.mu.write().unwrap();
+        let _mu = self.mu.write().map_err(|e| anyhow::anyhow!("Lock error: {:?}", e))?;
         let entry = Entry::new(key.to_string(), Vec::new(), Mark::DELETE);
         self.db_file.write(&entry)?;
         self.indexs.remove(key);
@@ -129,7 +128,7 @@ impl MiniBitCask {
         println!("valid_entries: {:?}", valid_entries);
         let mut merge_db_file = DBFile::new_merge(&self.dir_path)?;
         {
-            let _mu = self.mu.write().unwrap();
+            let _mu = self.mu.write().map_err(|e| anyhow::anyhow!("Lock error: {:?}", e))?;
             for entry in valid_entries {
                 let write_offsize = merge_db_file.offset;
                 merge_db_file.write(&entry)?;
@@ -161,12 +160,6 @@ struct DBFile {
     filename: PathBuf, // 保存文件路径
 }
 
-// impl Drop for DBFile {
-//     fn drop(&mut self) {
-//         // 文件会自动关闭
-//     }
-// }
-
 impl DBFile {
     fn new<P: AsRef<Path>>(dir_path: P) -> Result<DBFile> {
         let filepath = dir_path.as_ref().join(FILE_NAME); // 转换为 &Path，然后调用 join
@@ -176,13 +169,13 @@ impl DBFile {
         // 如果 P = PathBuf，需要 as_ref() 转换为 &Path
         // 如果 P = &Path，as_ref() 返回自身
         println!("filepath: {:?}", filepath);
-        DBFile::new_innternal(filepath)
+        DBFile::new_internal(filepath)
     }
     fn new_merge<P: AsRef<Path>>(dir_path: P) -> Result<DBFile> {
         let filepath = dir_path.as_ref().join(MERGE_FILE_NAME);
-        DBFile::new_innternal(filepath)
+        DBFile::new_internal(filepath)
     }
-    fn new_innternal<P: AsRef<Path>>(filepath: P) -> Result<DBFile> {
+    fn new_internal<P: AsRef<Path>>(filepath: P) -> Result<DBFile> {
         let file = File::options()
             .create(true)
             .read(true)
