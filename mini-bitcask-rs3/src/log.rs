@@ -5,16 +5,16 @@ use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 const KEY_VAL_HEADER_LEN: u32 = 4;
 
-type KeyDir = std::collections::BTreeMap<Vec<u8>, (u64, u32)>;
+pub type KeyDir = std::collections::BTreeMap<Vec<u8>, (u64, u32)>;
 
 #[derive(Debug)]
-struct Log {
+pub struct Log {
     path: PathBuf,
-    file: std::fs::File,
+    pub file: std::fs::File,
 }
 
 impl Log {
-    fn new(path: PathBuf) -> Result<Self> {
+    pub fn new(path: PathBuf) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -27,13 +27,13 @@ impl Log {
         Ok(Self { path, file })
     }
 
-    fn read_value(&mut self, valus_pos: u64, value_len: u32) -> Result<Vec<u8>> {
+    pub fn read_value(&mut self, valus_pos: u64, value_len: u32) -> Result<Vec<u8>> {
         self.file.seek(SeekFrom::Start(valus_pos))?;
         let mut value = vec![0; value_len as usize];
         self.file.read_exact(&mut value)?;
         Ok(value)
     }
-    fn write_entry(&mut self, key: &[u8], value: Option<&[u8]>) -> Result<(u64, u32)> {
+    pub fn write_entry(&mut self, key: &[u8], value: Option<&[u8]>) -> Result<(u64, u32)> {
         let key_len = key.len() as u32;
         let value_len = value.map_or(0, |v| v.len() as u32);
         let value_len_or_tomestone = value.map_or(-1, |v| v.len() as i32);
@@ -55,7 +55,7 @@ impl Log {
         Ok((offset, len))
     }
 
-    fn load_index(&mut self) -> Result<KeyDir> {
+    pub fn load_index(&mut self) -> Result<KeyDir> {
         let mut index = KeyDir::new();
         let mut len_buf = [0; 4];
 
