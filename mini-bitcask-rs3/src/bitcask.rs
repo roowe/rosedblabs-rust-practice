@@ -58,6 +58,23 @@ impl MiniBitcask {
             log: &mut self.log,
         }
     }
+    pub fn merge(&mut self) -> Result<()> {
+        let mut merge_path = self.log.path.clone();
+        merge_path.set_extension("merge");
+
+        let mut new_log = Log::new(merge_path)?;
+        let mut new_index = KeyDir::new();
+        for (key, (value_pos, value_len)) in self.index.iter() {
+            let value = self.log.read_value(*value_pos, *value_len)?;
+            let (offset, len) = new_log.write_entry(key, Some(&value))?;
+            new_index.insert(key.clone(), (offset + len as u64 - *value_len as u64, *value_len));
+        }
+        std::fs::rename(new_log.path, self.log.path.clone())?;
+        new_log.path = self.log.path.clone();
+        self.log = new_log;
+        self.index = new_index;
+        Ok(())
+    }
 
 }
 
@@ -262,6 +279,39 @@ mod tests {
 
         let (key5, _) = iter2.next_back().expect("no value founded")?;
         assert_eq!(key5, b"meeae".to_vec());
+
+        path.parent().map(|p| std::fs::remove_dir_all(p));
+        Ok(())
+    }
+    #[test]
+    fn test_merge() -> Result<()> {
+        let path = std::env::temp_dir()
+            .join("minibitcask-merge-test")
+            .join("log");
+
+        let mut eng = MiniBitcask::new(path.clone())?;
+
+        eng.set(b"a", b"value1".to_vec())?;
+        eng.set(b"b", b"value2".to_vec())?;
+        eng.set(b"c", b"value3".to_vec())?;
+        eng.delete(b"a")?;
+        eng.delete(b"b")?;
+        eng.delete(b"c")?;
+
+        eng.merge()?;
+
+        eng.set(b"a", b"value1".to_vec())?;
+        eng.set(b"b", b"value2".to_vec())?;
+        eng.set(b"c", b"value3".to_vec())?;
+
+        let val = eng.get(b"a")?;
+        assert_eq!(b"value1".to_vec(), val.unwrap());
+
+        let val = eng.get(b"b")?;
+        assert_eq!(b"value2".to_vec(), val.unwrap());
+
+        let val = eng.get(b"c")?;
+        assert_eq!(b"value3".to_vec(), val.unwrap());
 
         path.parent().map(|p| std::fs::remove_dir_all(p));
         Ok(())

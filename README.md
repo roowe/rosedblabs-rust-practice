@@ -33,3 +33,12 @@ some tiny learning projects in Rust, awesome!
 
 
 AI给我写了个`shunting_yard_evaluate`，中序转后序，然后再计算。
+
+
+## mini-bitcask-rs2和3
+
+mini-bitcask-rs2参考作者go版本的[https://github.com/rosedblabs/mini-bitcask](https://github.com/rosedblabs/mini-bitcask)写的。对文件接口不是很熟悉，不确定是不是写对了？跑是可以跑的，逻辑也对得上。
+
+mini-bitcask-rs3参考作者rust的版本写的，go和rust对二进制的编码处理不太一样，导致hash的index存的东西也不一样。rust的文件操作和golang不一样，没有使用read at，而是read exact，这个接口保证读满buf，而read at是短读，不一定读满。read exact更符合实际的预期。
+
+这个例子的好处，熟悉下文件操作，open、rename和close（rust这边是drop）特别是跨平台这一块的差异。也熟悉了下二进制的操作，这一块，对网络协议的理解也有帮助。

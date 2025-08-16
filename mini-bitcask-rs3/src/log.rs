@@ -9,7 +9,7 @@ pub type KeyDir = std::collections::BTreeMap<Vec<u8>, (u64, u32)>;
 
 #[derive(Debug)]
 pub struct Log {
-    path: PathBuf,
+    pub path: PathBuf,
     pub file: std::fs::File,
 }
 
