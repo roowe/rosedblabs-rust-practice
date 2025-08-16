@@ -1,0 +1,9 @@
+[package]
+name = "mvcc2"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.99"
+bincode = "2.0.1"
+once_cell = "1.21.3"
