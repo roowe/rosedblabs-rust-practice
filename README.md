@@ -42,3 +42,6 @@ mini-bitcask-rs2参考作者go版本的[https://github.com/rosedblabs/mini-bitca
 mini-bitcask-rs3参考作者rust的版本写的，go和rust对二进制的编码处理不太一样，导致hash的index存的东西也不一样。rust的文件操作和golang不一样，没有使用read at，而是read exact，这个接口保证读满buf，而read at是短读，不一定读满。read exact更符合实际的预期。
 
 这个例子的好处，熟悉下文件操作，open、rename和close（rust这边是drop）特别是跨平台这一块的差异。也熟悉了下二进制的操作，这一块，对网络协议的理解也有帮助。
+
+## mvcc2
+参考着做，这个例子的完成度比较低，只能说现有的代码，是了解mvcc，被GPT5提出一堆问题。
