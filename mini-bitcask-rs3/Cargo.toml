@@ -1,0 +1,9 @@
+[package]
+name = "mini-bitcask-rs3"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.99"
+fs4 = "0.13.1"
+tempfile = "3.20.0"
