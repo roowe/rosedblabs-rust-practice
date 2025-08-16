@@ -118,6 +118,7 @@ impl Log {
 mod tests {
 
     use super::*;
+    use std::process::Command;
 
     #[test]
     fn test_log() -> Result<()> {
@@ -144,6 +145,41 @@ mod tests {
         keys.sort();
         assert_eq!(keys, &[b"a", b"b"]);
 
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_exclusive_file_lock_across_processes() -> Result<()> {
+        let tmp_dir = tempfile::TempDir::new_in(".")?;
+        let tmp_path = tmp_dir.path().join("test_exclusive.db");
+
+        // First process (this test) acquires the lock
+        let _log = Log::new(tmp_path.clone())?;
+
+        // Second process attempts to acquire the lock and should fail (exit code 2)
+        let output = if let Some(p) = option_env!("CARGO_BIN_EXE_lock_probe") {
+            let helper_path = std::path::PathBuf::from(p);
+            Command::new(helper_path)
+                .arg(&tmp_path)
+                .output()?
+        } else {
+            // Fallback: invoke the helper via Cargo. Works when running tests from some IDEs.
+            Command::new("cargo")
+                .arg("run")
+                .arg("--quiet")
+                .arg("--bin").arg("lock_probe")
+                .arg("--")
+                .arg(&tmp_path)
+                .output()?
+        };
+
+        assert!(!output.status.success(), "second process unexpectedly acquired the lock");
+
+        // We expect our helper to exit with code 2 when lock acquisition fails
+        if let Some(code) = output.status.code() {
+            assert_eq!(code, 2, "unexpected exit code: {}", code);
+        }
 
         Ok(())
     }
